@@ -11,9 +11,7 @@ read_dotenv(str(ENV_FILE_PATH))
 
 SECRET_KEY = str(os.environ.get("DJANGO_SECRET_KEY"))
 
-# DEBUG = str(os.environ.get("DEBUG")) == "1"
-
-DEBUG = False
+DEBUG = str(os.environ.get("DEBUG")) == "1"
 
 SYSTEM_APPS = [
     "django.contrib.admin",
@@ -40,6 +38,7 @@ THIRD_PARTY_APPS = [
     "channels",
     "django_bleach",
     "django_filters",
+    "drf_yasg",
     "django_apscheduler",
 ]
 
@@ -158,24 +157,21 @@ STATIC_ROOT = BASE_DIR / "static"
 
 # CORS 관련
 
-CORS_ALLOW_ALL_ORIGINS = True
-
 CORS_ALLOW_CREDENTIALS = True
 
 CSRF_COOKIE_SECURE = True
 
 CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:3000",
+    "https://www.devinferno.com",
     "http://127.0.0.1:3000",
-    "https://*.litmus-domain.com",
-    "https://*.devinferno.com",
+    "http://localhost:3000",
 ]
 
 ALLOWED_HOSTS = [
     "localhost",
     "127.0.0.1",
-    "litmus-domain",
-    "devinferno",
+    "api.devinferno.com",
+    ".devinferno.com",
 ]
 
 CORS_ORIGIN_WHITELIST = CSRF_TRUSTED_ORIGINS
@@ -228,6 +224,8 @@ LOGGING = {
         },
     },
 }
+
+BLEACH_ALLOWED_TAGS = ["span","p","b","i","u","em","strong","a","img","h1","h2","h3","h4","h5","h6","br","pre","blockquote","hr","del","sub","sup","table","td","tr","tbody","div",]
 
 APSCHEDULER_DATETIME_FORMAT = "N j, Y, f:s a"
 
