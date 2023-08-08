@@ -5,9 +5,9 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db import transaction
 from community.serializers import BoardCreateSerializer
-from .models import Channel, ChannelDetail
-from . import serializers
-from . import youtube_api
+from youtube.models import Channel, ChannelDetail
+from youtube import serializers
+from youtube import youtube_api
 from django.db import transaction
 from rest_framework.permissions import IsAuthenticated
 from .throttling import ObjectThrottle
@@ -17,23 +17,24 @@ import logging
 
 
 class FindChannel(APIView):
-    permission_classes = [IsAuthenticated]
-    throttle_classes = [ObjectThrottle]
-    """
-    채널 조회\
+    """채널 검색
     검색결과 중 상위 5개를 딕셔너리를 포함한 리스트로 출력
     """
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ObjectThrottle]
 
     def post(self, request, channel):
-        youtube = youtube_api.youtube
         try:
-            channels = youtube_api.find_channelid(youtube, channel)
+            channels = youtube_api.find_channelid(channel)
         except:
             Response(status=status.HTTP_400_BAD_REQUEST)
         return Response(channels, status=status.HTTP_200_OK)
 
 
-class ChannelModelView(APIView):
+class ChannelAPIView(APIView):
+    """채널 조회 및 생성
+    Youtube 고유 채널 ID 필요, 거의 변하지 않는 값들이 저장됩니다.
+    """
     permission_classes = [IsAuthenticated]
     throttle_classes = [ObjectThrottle]
     def get(self, request, channel_id):
@@ -45,12 +46,11 @@ class ChannelModelView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def post(self, request, channel_id):
-        youtube = youtube_api.youtube
         channel = Channel.objects.filter(channel_id=channel_id).exists()
         if channel:
             return Response(status=status.HTTP_406_NOT_ACCEPTABLE)
         try:
-            channel_data = youtube_api.get_channel_stat(youtube, channel_id)
+            channel_data = youtube_api.get_channel_stat(channel_id)
             if not "upload_list" in channel_data:
                 return Response(status=status.HTTP_410_GONE)
             if int(channel_data["subscriber"]) < 10000:
@@ -60,7 +60,7 @@ class ChannelModelView(APIView):
                 if serializer.is_valid():
                     channel = serializer.save()
                     channel_detail_data = youtube_api.get_latest30_video_details(
-                        youtube, channel_data
+                        channel_data
                     )
                     channel_data.update(channel_detail_data)
                     channel_heatmap_url = youtube_api.create_channel_heatmap_url(
@@ -85,14 +85,13 @@ class ChannelModelView(APIView):
                 else:
                     raise Exception(serializer.errors)
         except Exception as e:
-            print(e)
-            return Response(status=status.HTTP_400_BAD_REQUEST)
+            return Response(e,status=status.HTTP_400_BAD_REQUEST)
 
     def put(self, request, channel_id):
         channel = get_object_or_404(Channel, channel_id=channel_id)
         youtube = youtube_api.youtube
         try:
-            channel_data = youtube_api.get_channel_stat(youtube, channel_id)
+            channel_data = youtube_api.get_channel_stat(channel_id)
         except:
             return Response(status=status.HTTP_400_BAD_REQUEST)
         serializer = serializers.ChannelSerializer(
@@ -110,7 +109,9 @@ class ChannelModelView(APIView):
         return Response(status=status.HTTP_200_OK)
 
 
-class ChannelDetailView(APIView):
+class ChannelDetailAPIView(APIView):
+    """채널 상세 정보 조회 및 생성
+    """
     def get(self, request, custom_url):
         channel = get_object_or_404(Channel, custom_url=custom_url)
         detail = (
@@ -156,7 +157,7 @@ class ChannelDetailView(APIView):
         except:
             return Response(status=status.HTTP_400_BAD_REQUEST)
 
-def update_data():
+def updata_detail_data():
     logging.basicConfig(filename='update_error.log', level=logging.ERROR)
     youtube = youtube_api.youtube
     channels = Channel.objects.all()

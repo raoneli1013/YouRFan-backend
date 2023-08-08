@@ -9,12 +9,12 @@ urlpatterns = [
     ),
     path(
         "<str:channel_id>/",
-        views.ChannelModelView.as_view(),
+        views.ChannelAPIView.as_view(),
         name="channel",
     ),
     path(
         "detail/<str:custom_url>/",
-        views.ChannelDetailView.as_view(),
+        views.ChannelDetailAPIView.as_view(),
         name="channel_detail",
     ),
 ]

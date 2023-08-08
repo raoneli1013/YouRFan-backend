@@ -1,6 +1,6 @@
 from apscheduler.schedulers.background import BackgroundScheduler
 from django_apscheduler.jobstores import register_events, DjangoJobStore
-from .views import update_data
+from .views import updata_detail_data
 
 
 def start():
@@ -9,5 +9,5 @@ def start():
     register_events(scheduler)
     @scheduler.scheduled_job('cron', hour=23, name = 'test')
     def auto_check():
-        update_data()
+        updata_detail_data()
     scheduler.start()

@@ -7,13 +7,11 @@ import io
 import os
 import requests
 import matplotlib as mpl
-from matplotlib import font_manager
 from wordcloud import WordCloud, STOPWORDS
 from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
-from yourfan.settings import YOUTUBE_API_KEY, BASE_DIR,CF_ACCOUNT_ID,CF_API_TOKEN
-mpl.use('agg')
-
+from yourfan.settings import YOUTUBE_API_KEY, BASE_DIR, CF_ACCOUNT_ID, CF_API_TOKEN
+mpl.use("agg")
 
 api_key = YOUTUBE_API_KEY
 youtube = build("youtube", "v3", developerKey=api_key)
@@ -249,19 +247,29 @@ id_topic_dict = {
 }
 
 
-# 채널 id 찾기
-def find_channelid(youtube, title):
-    request = youtube.search().list(part="snippet", type="channel", q=title)
-    response = request.execute()
 
-    channel_ids = []
-    for i in range(len(response["items"])):
-        channel_ids.append(response["items"][i]["snippet"]["channelId"])
+def find_channelid(title):
+    """채널 ID를 검색하는 함수
+    검색어를 받고 검색결과를 딕셔너리를 포함한 리스트로 리턴 
+    """
+    api_keys = YOUTUBE_API_KEY
+    for key in api_keys:
+        youtube = build("youtube", "v3", developerKey=key)
+        request = youtube.search().list(part="snippet", type="channel", q=title)
+        response = request.execute()
+        if "error" in response:
+            break
 
-    channels_request = youtube.channels().list(
-        part="snippet,statistics", id=",".join(channel_ids)
-    )
-    channels_response = channels_request.execute()
+        channel_ids = []
+        for i in range(len(response["items"])):
+            channel_ids.append(response["items"][i]["snippet"]["channelId"])
+        channels_request = youtube.channels().list(
+            part="snippet,statistics", id=",".join(channel_ids)
+        )
+        channels_response = channels_request.execute()
+        if "error" in response:
+            continue
+        break
 
     channels = []
     for i in range(len(response["items"])):
@@ -269,26 +277,28 @@ def find_channelid(youtube, title):
             channel_name=channels_response["items"][i]["snippet"]["title"],
             channel_id=channels_response["items"][i]["id"],
             subscriber=channels_response["items"][i]["statistics"]["subscriberCount"],
-            thumbnail=channels_response["items"][i]["snippet"]["thumbnails"]["default"][
-                "url"
-            ],
+            thumbnail=channels_response["items"][i]["snippet"]["thumbnails"]["default"]["url"],
         )
         channels.append(data)
 
     return channels
 
 
-# 채널 정보
-def get_channel_stat(youtube, channel_id):
+def get_channel_stat(channel_id):
+    """채널의 상세 데이터를 받고 전처리하는 함수
+    채널 ID를 넣으면 채널 데이터를 딕셔너리로 리턴
     """
-    채널 정보 조회\
-    channel_id를 받아 유튜브 채널 조회
-    """
-    request = youtube.channels().list(
-        part="snippet,contentDetails,statistics,topicDetails,brandingSettings",
-        id=channel_id,
-    )
-    response = request.execute()
+    api_keys = YOUTUBE_API_KEY
+    for key in api_keys:
+        youtube = build("youtube", "v3", developerKey=key)
+        request = youtube.channels().list(
+            part="snippet,contentDetails,statistics,topicDetails,brandingSettings",
+            id=channel_id,
+        )
+        response = request.execute()
+        if "error" not in response:
+            break
+
     data = dict(
         channel_id=response["items"][0]["id"],
         title=response["items"][0]["snippet"]["title"],
@@ -323,25 +333,20 @@ def get_channel_stat(youtube, channel_id):
     return data
 
 
-# 모든 비디오 아이디가져오기
-def get_video_ids(youtube, playlist_id):
-    request = youtube.playlistItems().list(
-        part="contentDetails", playlistId=playlist_id, maxResults=50
-    )
-    response = request.execute()
-
+def get_video_ids(playlist_id):
+    """채널에서 업로드한 비디오 ID를 조회함
+    채널의 playlist id를 넣으면 비디오 ID 리스트를 최신 기준으로 리스트로 리턴
+    """
+    api_keys = YOUTUBE_API_KEY
     video_ids = []
-
-    for i in range(len(response["items"])):
-        video_ids.append(response["items"][i]["contentDetails"]["videoId"])
-
-    next_page_token = response.get("nextPageToken")
+    next_page_token = None
     more_pages = True
+    response_data = []
 
-    while more_pages:
-        if next_page_token is None:
-            more_pages = False
-        else:
+    for key in api_keys:
+        youtube = build("youtube", "v3", developerKey=key)
+
+        while more_pages:
             request = youtube.playlistItems().list(
                 part="contentDetails",
                 playlistId=playlist_id,
@@ -349,95 +354,71 @@ def get_video_ids(youtube, playlist_id):
                 pageToken=next_page_token,
             )
             response = request.execute()
-
-            for i in range(len(response["items"])):
-                video_ids.append(response["items"][i]["contentDetails"]["videoId"])
-
+            if "error" in response:
+                break
+            response_data += response["items"]
             next_page_token = response.get("nextPageToken")
+            if next_page_token is None:
+                more_pages = False
+        else: break
+
+    for data in response_data:
+        video_ids.append(data["contentDetails"]["videoId"])
 
     return video_ids
 
 
-# 최상위 코멘트 가져오기
-def get_channel_comment(youtube, channel_id, day_delta=0):
-    request = youtube.commentThreads().list(
-        part="snippet,replies", allThreadsRelatedToChannelId=channel_id, maxResults=100
-    )
-    response = request.execute()
-
+def get_channel_comment(channel_id, day_delta=1, limit=100):
+    """채널의 코멘트를 최신 순서로 조회함
+    channel_id, day_delta(1=24h,1 이상,0은 작동 안함, default: 100), limit(최대 횟수: 100단위, default: 100)
+    """
+    api_keys = YOUTUBE_API_KEY
     comments = []
-    today = datetime.now(timezone.utc)
-    for i in range(len(response["items"])):
-        published_at = response["items"][i]["snippet"]["topLevelComment"]["snippet"][
-            "publishedAt"
-        ]
-        published_at = datetime.strptime(
-            published_at, "%Y-%m-%dT%H:%M:%S%z"
-        ) + timedelta(hours=9)
-        if (today - published_at).days > day_delta:
-            break
-
-        data = dict(
-            text=response["items"][i]["snippet"]["topLevelComment"]["snippet"][
-                "textOriginal"
-            ],
-            published_at=published_at,
-        )
-        comments.append(data)
-
-    next_page_token = response.get("nextPageToken")
+    next_page_token = None
     more_pages = True
     count = 1
-    while more_pages:
-        if next_page_token is None or count > 10:
-            more_pages = False
-        else:
+    today = datetime.now(timezone.utc)
+
+    for key in api_keys:
+        youtube = build("youtube", "v3", developerKey=key)
+
+        while more_pages:
             request = youtube.commentThreads().list(
-                part="snippet,replies",
-                allThreadsRelatedToChannelId=channel_id,
-                maxResults=100,
-                pageToken=next_page_token,
-            )
+                        part='snippet',
+                        allThreadsRelatedToChannelId=channel_id,
+                        maxResults = 100,
+                        pageToken = next_page_token)
             response = request.execute()
-
-        for i in range(len(response["items"])):
-            published_at = response["items"][i]["snippet"]["topLevelComment"][
-                "snippet"
-            ]["publishedAt"]
-            published_at = datetime.strptime(
-                published_at, "%Y-%m-%dT%H:%M:%S%z"
-            ) + timedelta(hours=9)
-            if (today - published_at).days > day_delta:
+            if "error" in response:
                 break
+            comments+=response['items']
+            published_at = datetime.strptime(
+                comments[-1]['snippet']['topLevelComment']['snippet']['publishedAt'],
+                "%Y-%m-%dT%H:%M:%S%z"
+                ) + timedelta(hours=9)
+            if (today-published_at).days>=day_delta: break
 
-            data = dict(
-                text=response["items"][i]["snippet"]["topLevelComment"]["snippet"][
-                    "textOriginal"
-                ],
-                published_at=published_at,
-            )
-            comments.append(data)
-            next_page_token = response.get("nextPageToken")
-        count += 1
-
-    csv_file_path = BASE_DIR / "comment.csv"
-    with open(csv_file_path, "w", newline="") as csv_file:
-        fieldnames = ["text", "published_at"]
-        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
-
-        writer.writeheader()
-        for item in comments:
-            writer.writerow(item)
-
-    return {"message": "complate"}
+            next_page_token = response.get('nextPageToken')
+            count+=1
+            if next_page_token is None or count>limit:
+                more_pages = False
+        else: break
+    return comments
 
 
-# 채널 인사이트
-def get_latest30_video_details(youtube, channel_data):
-    request = youtube.playlistItems().list(
-        part="contentDetails", playlistId=channel_data["upload_list"], maxResults=30
-    )
-    response = request.execute()
+def get_latest30_video_details(channel_data):
+    """
+
+    """
+    api_keys = YOUTUBE_API_KEY
+    for key in api_keys:
+        youtube = build("youtube", "v3", developerKey=key)
+        request = youtube.playlistItems().list(
+            part="contentDetails", playlistId=channel_data["upload_list"], maxResults=30
+        )
+        response = request.execute()
+        if "error" in response:
+            break
     video_ids = []
 
     for i in range(len(response["items"])):
@@ -461,7 +442,7 @@ def get_latest30_video_details(youtube, channel_data):
             "Saturday": [],
             "Sunday": [],
         },
-        "tags": []
+        "tags": [],
     }
     for video in detail_response["items"]:
         if "viewCount" in video["statistics"]:
@@ -514,88 +495,86 @@ def get_latest30_video_details(youtube, channel_data):
     return video_data
 
 
-# 채널 댓글 가져오기
-def get_channel_comment(youtube, channel_id, day_delta=0):
-    comments = []
-    next_page_token = None
-    more_pages = True
-    count = 1
-    while more_pages:
-        request = youtube.commentThreads().list(
-            part="snippet",
-            allThreadsRelatedToChannelId=channel_id,
-            maxResults=100,
-            pageToken=next_page_token,
-        )
-        response = request.execute()
-
-        comments += response["items"]
-        next_page_token = response.get("nextPageToken")
-        count += 1
-        if next_page_token is None or count > 100:
-            more_pages = False
-    return comments
-
 
 def create_channel_heatmap_url(data):
-    activity_time = data['activity_time']
+    activity_time = data["activity_time"]
 
-    df = pd.DataFrame([
-        (day, hour)
-        for day, hours in activity_time.items()
-        for hour in hours
-    ], columns=['DayOfWeek', 'Hour'])
-    df['Hour'] = pd.to_numeric(df['Hour'])
-    days_of_week = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    df['DayOfWeek'] = pd.Categorical(df['DayOfWeek'], categories=days_of_week, ordered=True)
+    df = pd.DataFrame(
+        [(day, hour) for day, hours in activity_time.items() for hour in hours],
+        columns=["DayOfWeek", "Hour"],
+    )
+    df["Hour"] = pd.to_numeric(df["Hour"])
+    days_of_week = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    ]
+    df["DayOfWeek"] = pd.Categorical(
+        df["DayOfWeek"], categories=days_of_week, ordered=True
+    )
 
-    pivot = df.pivot_table(index='Hour', columns='DayOfWeek', aggfunc='size', fill_value=0)
+    pivot = df.pivot_table(
+        index="Hour", columns="DayOfWeek", aggfunc="size", fill_value=0
+    )
     pivot = pivot.reindex(np.arange(0, 24), fill_value=0)
 
     plt.figure(figsize=(7, 7))
-    sns.heatmap(pivot, cmap='Greens', linewidths=.5, facecolor='#f8f9fa')
+    sns.heatmap(pivot, cmap="Greens", linewidths=0.5, facecolor="#f8f9fa")
     plt.ylim(0, 24)
     plt.yticks(np.arange(0, 25, 2), labels=np.arange(0, 25, 2), rotation=0)
-    plt.xlabel('')
-    plt.ylabel('')
+    plt.xlabel("")
+    plt.ylabel("")
 
     buffer = io.BytesIO()
-    plt.savefig(buffer, format='png')
+    plt.savefig(buffer, format="png")
     buffer.seek(0)
-    img = {'file': buffer}
+    img = {"file": buffer}
     url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/images/v2/direct_upload"
     one_time_url = requests.post(
         url, headers={"Authorization": f"Bearer {CF_API_TOKEN}"}
     )
     one_time_url = one_time_url.json()
     upload_url = one_time_url.get("result")
-    response = requests.post(upload_url['uploadURL'], files=img)
+    response = requests.post(upload_url["uploadURL"], files=img)
     response_json = response.json()
     plt.close()
     buffer.close()
-    return response_json['result']['variants'][0]
+    return response_json["result"]["variants"][0]
+
 
 def create_wordcloud_url(data):
     tags = data["tags"]
     if not tags:
         return ""
     tags_text = " ".join(tags)
-    plt.subplots(figsize=(25,15))
-    wordcloud = WordCloud(font_path=os.path.join(BASE_DIR, 'NanumGothic.ttf'), background_color='#f8f9fa', width=1000, height=700, stopwords=STOPWORDS).generate(tags_text)
-    plt.axis('off')
+    plt.subplots(figsize=(25, 15))
+    wordcloud = WordCloud(
+        font_path=os.path.join(BASE_DIR, "NanumGothic.ttf"),
+        background_color="#f8f9fa",
+        width=1000,
+        height=700,
+        stopwords=STOPWORDS,
+    ).generate(tags_text)
+    plt.axis("off")
     plt.imshow(wordcloud)
     buffer = io.BytesIO()
-    plt.savefig(buffer, format='png')
+    plt.savefig(buffer, format="png")
     buffer.seek(0)
-    img = {'file': buffer}
+    img = {"file": buffer}
     url = f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/images/v2/direct_upload"
     one_time_url = requests.post(
         url, headers={"Authorization": f"Bearer {CF_API_TOKEN}"}
     )
     one_time_url = one_time_url.json()
     upload_url = one_time_url.get("result")
-    response = requests.post(upload_url['uploadURL'], files=img)
+    response = requests.post(upload_url["uploadURL"], files=img)
     response_json = response.json()
     plt.close()
     buffer.close()
-    return response_json['result']['variants'][0]
+    return response_json["result"]["variants"][0]
+
+
